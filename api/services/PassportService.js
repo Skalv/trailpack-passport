@@ -121,13 +121,31 @@ module.exports = class PassportService extends Service {
     // Generating accessToken for API authentication
     const token = crypto.randomBytes(48).toString('base64')
 
-    return this.app.services.FootprintService.create('user', userInfos).then(user => {
-      return this.app.services.FootprintService.create('Passport', {
+    userInfos.passports = {
+      protocol: 'local',
+      password: password,
+      user: userInfos,
+      accessToken: token
+    }
+
+    let options = {
+      include: [this.app.orm.Passport]
+    }
+
+    return this.app.services.FootprintService.create('user', userInfos, options).then(user => {
+      const record = {
         protocol: 'local',
         password: password,
-        user: user.id,
-        accessToken: token
-      }).then(passport => Promise.resolve(user))
+        accessToken: crypto.randomBytes(48).toString('base64')
+      }
+      if (this.app.config.database.orm == 'sequelize') {
+        record.userId = user.id
+      } else {
+        record.user = user.id
+      }
+
+      return this.app.services.FootprintService.create('Passport', record)
+      .then(passport => Promise.resolve(user))
     })
   }
 
@@ -148,11 +166,18 @@ module.exports = class PassportService extends Service {
       user: user.id
     }).then(passport => {
       if (!passport) {
-        return this.app.orm.Passport.create({
+        const record = {
           protocol: 'local',
-          password: password,
-          user: user.id
-        })
+          password: password
+        }
+
+        if (this.app.config.database.orm == 'sequelize') {
+          record.userId = user.id
+        } else {
+          record.user = user.id
+        }
+
+        return this.app.orm.Passport.create(record)
       }
     })
   }
@@ -191,26 +216,28 @@ module.exports = class PassportService extends Service {
     const criteria = {}
     criteria[_.get(this.app, 'config.session.strategies.local.options.usernameField') || 'username'] = identifier
 
-    return this.app.services.FootprintService.find('User', criteria, {populate: 'passports', findOne: true})
+    return this.app.services.FootprintService.find('User', criteria, {findOne: true})
       .then(user => {
         if (!user) {
           throw new Error('E_USER_NOT_FOUND')
         }
 
-        const passport = user.passports.find(passportObj => passportObj.protocol === 'local')
-        if (!passport) {
-          throw new Error('E_USER_NO_PASSWORD')
-        }
+        return user.getPassports({where:{protocol:'local'}}).then(passport => {
 
-        return new Promise((resolve, reject) => {
-          bcrypt.compare(password, passport.password, (err, valid) => {
-            if (err) {
-              return reject(err)
-            }
+          if (!passport) {
+            throw new Error('E_USER_NO_PASSWORD')
+          }
+          this.app.config.log.logger.info(passport[0].password, password)
+          return new Promise((resolve, reject) => {
+            bcrypt.compare(password, passport[0].password, (err, valid) => {
+              if (err) {
+                return reject(err)
+              }
 
-            return valid
-            ? resolve(user)
-            : reject(new Error('E_WRONG_PASSWORD'))
+              return valid
+              ? resolve(user)
+              : reject(new Error('E_WRONG_PASSWORD'))
+            })
           })
         })
       })
