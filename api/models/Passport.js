@@ -56,16 +56,16 @@ module.exports = class Passport extends Model {
     }
     else if (app && app.config.database.orm == 'sequelize') {
       config = {
+        // hooks: {
+        //   beforeCreate: (values, options, cb) => {
+        //     hashPassword(values, cb)
+        //   },
+        //   beforeUpdate: (values, options, cb) => {
+        //     hashPassword(values, cb)
+        //   }
+        // },
         //More informations about supported models options here : http://docs.sequelizejs.com/en/latest/docs/models-definition/#configuration
         options: {
-          hooks: {
-            beforeCreate: (values, options) => {
-              hashPassword(values, () => {})
-            },
-            beforeUpdate: (values, options) => {
-              hashPassword(values, () => {})
-            }
-          },
           classMethods: {
             //If you need associations, put them here
             associate: (models) => {
@@ -147,7 +147,11 @@ module.exports = class Passport extends Model {
         password: {
           type: Sequelize.STRING,
           allowNull: true,
-          min: 8
+          min: 8,
+          set: function(val) {
+            let hash = bcrypt.hashSync(val, 10)
+            this.setDataValue('password', hash)
+          }
         },
         accessToken: {type: Sequelize.STRING, allowNull: true},
 
