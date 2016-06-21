@@ -136,7 +136,7 @@ module.exports = class PassportService extends Service {
       const record = {
         protocol: 'local',
         password: password,
-        accessToken: crypto.randomBytes(48).toString('base64')
+        accessToken: token
       }
       if (this.app.config.database.orm == 'sequelize') {
         record.userId = user.id
@@ -216,30 +216,41 @@ module.exports = class PassportService extends Service {
     const criteria = {}
     criteria[_.get(this.app, 'config.session.strategies.local.options.usernameField') || 'username'] = identifier
 
-    return this.app.services.FootprintService.find('User', criteria, {findOne: true})
-      .then(user => {
-        if (!user) {
-          throw new Error('E_USER_NOT_FOUND')
+    const query = (this.app.config.database.orm == 'sequelize')
+      ? this.app.services.FootprintService.find('User', criteria, {findOne: true})
+      : this.app.services.FootprintService.find('User', criteria, {populate: 'passports', findOne: true})
+
+    return query.then(user => {
+      if (!user) {
+        throw new Error('E_USER_NOT_FOUND')
+      }
+
+      let returnedPromise = (passport) => {
+        if (!passport) {
+          throw new Error('E_USER_NO_PASSWORD')
         }
 
-        return user.getPassports({where:{protocol:'local'}}).then(passport => {
+        return new Promise((resolve, reject) => {
+          bcrypt.compare(password, passport[0].password, (err, valid) => {
+            if (err) {
+              return reject(err)
+            }
 
-          if (!passport) {
-            throw new Error('E_USER_NO_PASSWORD')
-          }
-          this.app.config.log.logger.info(passport[0].password, password)
-          return new Promise((resolve, reject) => {
-            bcrypt.compare(password, passport[0].password, (err, valid) => {
-              if (err) {
-                return reject(err)
-              }
-
-              return valid
-              ? resolve(user)
-              : reject(new Error('E_WRONG_PASSWORD'))
-            })
+            return valid
+            ? resolve(user)
+            : reject(new Error('E_WRONG_PASSWORD'))
           })
         })
-      })
+      }
+
+      if (this.app.config.database.orm == 'sequelize') {
+        return user.getPassports({where:{protocol:'local'}}).then(passport => {
+          return returnedPromise(passport)
+        })
+      } else {
+        const passport = user.passports.find(passportObj => passportObj.protocol === 'local')
+        return returnedPromise(passport)
+      }
+    })
   }
 }
