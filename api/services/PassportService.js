@@ -71,7 +71,6 @@ module.exports = class PassportService extends Service {
   callback(req, res, next) {
     const provider = req.params.provider || 'local'
     const action = req.params.action
-
     if (provider === 'local') {
       if (action === 'register' && !req.user) {
         this.register(req.body)
@@ -194,10 +193,13 @@ module.exports = class PassportService extends Service {
 
     query.user = user.id
     query[provider === 'local' ? 'protocol' : 'provider'] = provider
-
     this.app.orm.Passport.findOne(query).then(passport => {
+      const options = (this.app.config.database.orm == 'sequelize')
+        ? {where: {id: passport.id}}
+        : passport.id
+        
       if (passport) {
-        return this.app.orm.Passport.destroy(passport.id)
+        return this.app.orm.Passport.destroy(options)
           .then(passport => next(null, user))
       }
       else {
@@ -226,7 +228,7 @@ module.exports = class PassportService extends Service {
       }
 
       let returnedPromise = (passport) => {
-        if (!passport) {
+        if (_.isEmpty(passport)) {
           throw new Error('E_USER_NO_PASSWORD')
         }
 
